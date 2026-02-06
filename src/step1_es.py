@@ -94,7 +94,7 @@ def compute_es(events_i, events_j, tau_max):
     return Q, es_ij, np.array(pairs, dtype=np.int32)
 
 
-def process_pair(i, j, events_subset, tau_max):
+def process_pair(i, j, events_array, tau_max):
     """
     處理單個地點對的ES計算
     
@@ -104,8 +104,8 @@ def process_pair(i, j, events_subset, tau_max):
         地點i的索引
     j : int
         地點j的索引
-    events_subset : pd.DataFrame
-        事件資料
+    events_array : np.ndarray
+        事件資料，形狀(n_time, n_locations)
     tau_max : int
         最大時間窗口
     
@@ -115,20 +115,20 @@ def process_pair(i, j, events_subset, tau_max):
         (i, j, Q, es_ij, pairs)
     """
     Q, es_ij, pairs = compute_es(
-        events_subset.iloc[:, i].values,
-        events_subset.iloc[:, j].values,
+        events_array[:, i],
+        events_array[:, j],
         tau_max
     )
     return i, j, Q, es_ij, pairs
 
 
-def compute_all_es_pairs(events_subset, tau_max, n_jobs=-1):
+def compute_all_es_pairs(events_data, tau_max, n_jobs=-1):
     """
     計算所有地點對的ES
     
     Parameters:
     -----------
-    events_subset : pd.DataFrame
+    events_data : pd.DataFrame or np.ndarray
         事件資料，形狀(n_time, n_locations)
     tau_max : int
         最大時間窗口
@@ -140,7 +140,13 @@ def compute_all_es_pairs(events_subset, tau_max, n_jobs=-1):
     results : list
         [(i, j, Q, es_ij, pairs), ...]
     """
-    n_time, n_grid = events_subset.shape
+    # 統一轉為 numpy array
+    if isinstance(events_data, pd.DataFrame):
+        events_array = events_data.values
+    else:
+        events_array = np.asarray(events_data)
+    
+    n_time, n_grid = events_array.shape
     n_pairs = n_grid * (n_grid - 1) // 2
     
     print(f"\n計算ES同步強度：")
@@ -150,7 +156,7 @@ def compute_all_es_pairs(events_subset, tau_max, n_jobs=-1):
     print(f"  開始時間: {get_timestamp()}")
     
     results = Parallel(n_jobs=n_jobs, backend="loky", verbose=5)(
-        delayed(process_pair)(i, j, events_subset, tau_max)
+        delayed(process_pair)(i, j, events_array, tau_max)
         for i in range(n_grid)
         for j in range(i + 1, n_grid)
     )
@@ -216,8 +222,8 @@ def run_es_calculation(events_period, lat, lon, period_name,
     
     Parameters:
     -----------
-    events_period : pd.DataFrame or xr.DataArray
-        時期事件資料
+    events_period : pd.DataFrame or xr.DataArray or np.ndarray
+        時期事件資料，形狀(n_time, n_locations)
     lat : np.ndarray
         緯度數組
     lon : np.ndarray
@@ -242,9 +248,27 @@ def run_es_calculation(events_period, lat, lon, period_name,
     
     print_step_header(1, "ES識別同步事件", period_name)
     
-    # 轉換為DataFrame
-    if hasattr(events_period, 'to_dataframe'):
-        events_period = events_period.to_dataframe().unstack()
+    # ⭐ 修正: 轉換為 numpy array 或 DataFrame
+    if not isinstance(events_period, (pd.DataFrame, np.ndarray)):
+        print("\n轉換資料格式...")
+        if hasattr(events_period, 'values'):
+            # xarray DataArray → numpy array
+            events_period = events_period.values
+            print(f"  已轉為 numpy array: {events_period.shape}")
+        else:
+            raise ValueError(f"不支援的資料類型: {type(events_period)}")
+    
+    # 驗證形狀
+    if isinstance(events_period, pd.DataFrame):
+        n_time, n_locations = events_period.shape
+    else:
+        n_time, n_locations = events_period.shape
+    
+    print(f"\n輸入資料:")
+    print(f"  類型: {type(events_period).__name__}")
+    print(f"  形狀: ({n_time}, {n_locations})")
+    print(f"  時間點數: {n_time}")
+    print(f"  地點數: {n_locations}")
     
     # 計算ES
     results = compute_all_es_pairs(
