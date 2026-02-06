@@ -139,6 +139,12 @@ def run_similarity_calculation(event_matrix=None, period_name=None,
         print("\n自動載入事件矩陣...")
         filepath = output_dir / 'event_matrices' / f'event_matrix_{period_name}.npy'
         event_matrix = load_numpy(filepath)
+
+    active_node_indices = np.where(event_matrix.sum(axis=0) > 0)[0]
+    event_matrix_active = event_matrix[:, active_node_indices]
+    
+    print(f"原始格點數: {event_matrix.shape[1]}")
+    print(f"活躍格點數 (篩選後): {event_matrix_active.shape[1]}")
     
     # 計算相似度
     similarity_matrix = compute_jaccard_similarity(event_matrix)
