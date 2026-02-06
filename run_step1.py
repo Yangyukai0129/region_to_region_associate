@@ -55,22 +55,20 @@ def main():
     )
     
     # 步驟2：建立事件矩陣
-    event_matrix, event_info = run_event_matrix_creation(
-        results,
-        n_locations,
-        period_name,
-        config=Config
-    )
+    # event_matrix, event_info = run_event_matrix_creation(
+    #     results,
+    #     n_locations,
+    #     period_name,
+    #     config=Config
+    # )
     
-    if event_matrix is not None:
+    if results is not None:
         print("\n" + "="*70)
-        print("✓ 步驟1-2完成！")
+        print("✓ 步驟1完成！")
         print("="*70)
         print(f"\n產生的檔案：")
         print(f"  1. {Config.PROCESSED_DATA_DIR}/es_results/es_full_{period_name}.pkl")
         print(f"  2. {Config.PROCESSED_DATA_DIR}/es_results/es_summary_{period_name}.csv")
-        print(f"  3. {Config.PROCESSED_DATA_DIR}/event_matrices/event_matrix_{period_name}.npy")
-        print(f"  4. {Config.PROCESSED_DATA_DIR}/event_matrices/event_info_{period_name}.json")
 
 
 if __name__ == "__main__":
