@@ -1,10 +1,12 @@
 """
-步驟2：從ES結果建立事件×空間矩陣 (記憶體優化版)
+步驟2：從ES結果建立事件×空間矩陣 (記憶體優化版 + 實際日期修正)
 """
 
 import numpy as np
 from sklearn.cluster import DBSCAN
 import pickle
+import xarray as xr
+import pandas as pd
 import sys
 sys.path.append('.')
 
@@ -15,7 +17,7 @@ from src.utils import (
 )
 
 
-def collect_sync_pairs_streaming(filepath, min_q, batch_size=50000):
+def collect_sync_pairs_streaming(filepath, min_q, time_values, batch_size=50000):
     """
     串流式讀取 ES 結果,收集同步配對
     
@@ -25,6 +27,8 @@ def collect_sync_pairs_streaming(filepath, min_q, batch_size=50000):
         ES 結果文件路徑
     min_q : float
         Q 值閾值
+    time_values : np.ndarray
+        實際的日期時間數組 (從 xarray 的 valid_time)
     batch_size : int
         每次處理的配對數
     
@@ -36,6 +40,7 @@ def collect_sync_pairs_streaming(filepath, min_q, batch_size=50000):
     print(f"\n【步驟2.1】串流式收集同步時間配對...")
     print(f"  MIN_Q 閾值: {min_q}")
     print(f"  批次大小: {batch_size}")
+    print(f"  ⭐ 使用實際日期進行處理")
     
     batch = []
     total_pairs = 0
@@ -53,8 +58,19 @@ def collect_sync_pairs_streaming(filepath, min_q, batch_size=50000):
             # 只處理符合閾值的配對
             if Q >= min_q and len(pairs) > 0:
                 for t_i, t_j in pairs:
+                    # ⭐ 關鍵修改: 使用實際日期
+                    date_i = time_values[t_i]
+                    date_j = time_values[t_j]
+                    
+                    # 轉換為 Unix 時間戳 (天數)
+                    timestamp_i = date_i.astype('datetime64[D]').astype(float)
+                    timestamp_j = date_j.astype('datetime64[D]').astype(float)
+                    
+                    # 計算平均時間
+                    time_avg = (timestamp_i + timestamp_j) / 2
+                    
                     batch.append({
-                        'time_avg': (t_i + t_j) / 2,
+                        'time_avg': time_avg,  # 實際日期的平均值
                         'locations': [i, j],
                         't_i': int(t_i),
                         't_j': int(t_j)
@@ -78,7 +94,7 @@ def collect_sync_pairs_streaming(filepath, min_q, batch_size=50000):
     print(f"  完成: 收集到 {accepted_pairs} 個同步配對 (Q >= {min_q})")
 
 
-def create_event_matrix_from_es(results, n_locations, config=None):
+def create_event_matrix_from_es(results, n_locations, config=None, time_values=None):
     """
     從ES的pairs資訊建立事件×空間矩陣 (原始版本,保留兼容性)
     
@@ -90,6 +106,8 @@ def create_event_matrix_from_es(results, n_locations, config=None):
         地點總數
     config : Config, optional
         配置對象
+    time_values : np.ndarray, optional
+        實際的日期時間數組
     
     Returns:
     --------
@@ -101,15 +119,28 @@ def create_event_matrix_from_es(results, n_locations, config=None):
     if config is None:
         config = Config
     
+    if time_values is None:
+        raise ValueError("必須提供 time_values (實際日期時間數組)")
+    
     print("\n【步驟2.1】收集同步時間配對...")
+    print(f"  ⭐ 使用實際日期進行處理")
     
     all_sync_pairs = []
     
     for i, j, Q, es_ij, pairs in results:
         if Q >= config.MIN_Q:
             for t_i, t_j in pairs:
+                # ⭐ 使用實際日期
+                date_i = time_values[t_i]
+                date_j = time_values[t_j]
+                
+                timestamp_i = date_i.astype('datetime64[D]').astype(float)
+                timestamp_j = date_j.astype('datetime64[D]').astype(float)
+                
+                time_avg = (timestamp_i + timestamp_j) / 2
+                
                 all_sync_pairs.append({
-                    'time_avg': (t_i + t_j) / 2,
+                    'time_avg': time_avg,
                     'locations': [i, j],
                     't_i': int(t_i),
                     't_j': int(t_j)
@@ -172,7 +203,7 @@ def create_event_matrix_from_es(results, n_locations, config=None):
     return event_matrix, event_info
 
 
-def create_event_matrix_from_es_streaming(filepath, n_locations, config=None):
+def create_event_matrix_from_es_streaming(filepath, n_locations, config=None, time_values=None):
     """
     從ES結果串流式建立事件×空間矩陣 (記憶體優化版)
     
@@ -184,6 +215,8 @@ def create_event_matrix_from_es_streaming(filepath, n_locations, config=None):
         地點總數
     config : Config, optional
         配置對象
+    time_values : np.ndarray, optional
+        實際的日期時間數組
     
     Returns:
     --------
@@ -195,41 +228,35 @@ def create_event_matrix_from_es_streaming(filepath, n_locations, config=None):
     if config is None:
         config = Config
     
-    # 第一遍: 收集所有同步配對的時間 (只存時間,省記憶體)
-    print("\n【第一遍掃描】收集時間點用於聚類...")
-    all_times = []
+    if time_values is None:
+        raise ValueError("必須提供 time_values (實際日期時間數組)")
     
     # 第一遍: 收集時間點並去重
     print("\n【第一遍掃描】收集時間點用於聚類...")
-    all_times_set = set()  # ← 改用 set 去重
-
-    for batch in collect_sync_pairs_streaming(filepath, config.MIN_Q):
+    all_times_set = set()
+    
+    for batch in collect_sync_pairs_streaming(filepath, config.MIN_Q, time_values):
         times = [p['time_avg'] for p in batch]
-        all_times_set.update(times)  # ← 自動去重
+        all_times_set.update(times)
         
         # 控制記憶體
-        if len(all_times_set) > 1000000:  # ← 降低上限到 100萬
+        if len(all_times_set) > 1000000:
             print(f"  ⚠️ 時間點過多 ({len(all_times_set)}),建議提高 MIN_Q")
             break
-
-    all_times = sorted(all_times_set)  # ← 轉回 list 並排序
-    del all_times_set  # ← 釋放記憶體
-
+    
+    all_times = sorted(all_times_set)
+    del all_times_set
+    
     if len(all_times) == 0:
         print("  ⚠️ 沒有符合條件的同步配對")
         return None, None
-
+    
     print(f"  收集到 {len(all_times)} 個唯一時間點")
-    
-    if len(all_times) == 0:
-        print("  ⚠️ 沒有符合條件的同步配對")
-        return None, None
-    
-    print(f"  收集到 {len(all_times)} 個時間點")
     
     # DBSCAN 聚類
     print("\n【步驟2.2】時間聚類識別事件...")
     print(f"  DBSCAN參數: eps={config.DBSCAN_EPS}, min_samples={config.DBSCAN_MIN_SAMPLES}")
+    print(f"  ⭐ 使用實際日期進行聚類 (已考慮季節性)")
     
     times_array = np.array(all_times).reshape(-1, 1)
     clustering = DBSCAN(
@@ -250,7 +277,7 @@ def create_event_matrix_from_es_streaming(filepath, n_locations, config=None):
     event_id_map = {old_id: new_id for new_id, old_id in enumerate(unique_events)}
     
     for idx, label in enumerate(labels):
-        if label >= 0:  # 忽略噪音
+        if label >= 0:
             time_to_event[all_times[idx]] = event_id_map[label]
     
     # 清理記憶體
@@ -267,7 +294,7 @@ def create_event_matrix_from_es_streaming(filepath, n_locations, config=None):
     event_times = [[] for _ in range(n_events)]
     
     batch_count = 0
-    for batch in collect_sync_pairs_streaming(filepath, config.MIN_Q):
+    for batch in collect_sync_pairs_streaming(filepath, config.MIN_Q, time_values):
         batch_count += 1
         
         for pair in batch:
@@ -279,7 +306,7 @@ def create_event_matrix_from_es_streaming(filepath, n_locations, config=None):
                 
                 # 標記地點
                 for loc in pair['locations']:
-                    if loc < n_locations:  # 安全檢查
+                    if loc < n_locations:
                         event_matrix[event_id, loc] = 1
                         event_locations[event_id].add(loc)
                 
@@ -376,16 +403,41 @@ def run_event_matrix_creation(results=None, n_locations=None, period_name=None,
     print(f"\nES 結果文件: {filepath}")
     print(f"文件大小: {file_size_mb:.1f} MB")
     
-    if file_size_mb > 1000:  # 超過 1GB
+    if file_size_mb > 1000:
         print(f"⚠️ 文件較大,強烈建議使用串流模式")
         use_streaming = True
+    
+    # ⭐ 新增: 載入時間座標
+    print("\n載入時間座標...")
+    ds = xr.open_dataset(config.RAW_DATA_PATH)
+    period_info = config.get_period_info(period_name)
+    
+    if period_info is None:
+        raise ValueError(f"找不到時期: {period_name}")
+    
+    start_date, end_date, _ = period_info
+    
+    events_period = ds['t'].sel(valid_time=slice(start_date, end_date))
+    time_values = events_period['valid_time'].values
+    
+    print(f"  時間範圍: {pd.Timestamp(time_values[0])} ~ {pd.Timestamp(time_values[-1])}")
+    print(f"  總天數: {len(time_values)}")
+    
+    # 檢查時間間隔
+    time_diffs = np.diff(time_values).astype('timedelta64[D]').astype(int)
+    max_gap = time_diffs.max()
+    mean_gap = time_diffs.mean()
+    print(f"  時間間隔: 平均 {mean_gap:.1f} 天, 最大 {max_gap} 天")
+    
+    if max_gap > 30:
+        print(f"  ⚠️ 檢測到大時間跳躍 (最大 {max_gap} 天)")
+        print(f"  已啟用實際日期處理模式")
     
     # 推斷地點數 (如果未提供)
     if n_locations is None and results is None:
         print("\n推斷地點數...")
         with open(filepath, 'rb') as f:
             temp_results = pickle.load(f)
-            # 只看前 1000 個來推斷
             sample = temp_results[:min(1000, len(temp_results))]
             max_idx = max(max(i, j) for i, j, _, _, _ in sample)
             n_locations = max_idx + 1
@@ -394,20 +446,18 @@ def run_event_matrix_creation(results=None, n_locations=None, period_name=None,
     
     # 選擇處理模式
     if use_streaming and results is None:
-        # 串流模式: 不載入整個 results
         print(f"\n使用串流模式處理 (節省記憶體)")
         event_matrix, event_info = create_event_matrix_from_es_streaming(
-            filepath, n_locations, config
+            filepath, n_locations, config,
+            time_values=time_values  # ⭐ 傳入時間
         )
     else:
-        # 標準模式: 載入整個 results
         if results is None:
             print("\n載入 ES 結果...")
             with open(filepath, 'rb') as f:
                 results = pickle.load(f)
             print(f"  已載入 {len(results)} 個地點對")
             
-            # 從結果推斷地點數
             if n_locations is None:
                 max_idx = max(max(i, j) for i, j, _, _, _ in results)
                 n_locations = max_idx + 1
@@ -415,7 +465,8 @@ def run_event_matrix_creation(results=None, n_locations=None, period_name=None,
         
         print(f"\n使用標準模式處理")
         event_matrix, event_info = create_event_matrix_from_es(
-            results, n_locations, config
+            results, n_locations, config,
+            time_values=time_values  # ⭐ 傳入時間
         )
     
     if event_matrix is None:
