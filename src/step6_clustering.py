@@ -218,14 +218,15 @@ def final_clustering(distance_matrix, n_clusters, linkage_method='ward'):
     
     # 統計每個群的大小
     cluster_sizes = Counter(labels)
+    formatted_sizes = {str(int(k)): int(v) for k, v in cluster_sizes.items()}
     
     cluster_info = {
-        'n_clusters': n_clusters,
-        'cluster_sizes': dict(cluster_sizes),
-        'min_size': min(cluster_sizes.values()),
-        'max_size': max(cluster_sizes.values()),
-        'mean_size': np.mean(list(cluster_sizes.values())),
-        'median_size': np.median(list(cluster_sizes.values()))
+        'n_clusters': int(n_clusters),
+        'cluster_sizes': formatted_sizes,
+        'min_size': int(min(cluster_sizes.values())),
+        'max_size': int(max(cluster_sizes.values())),
+        'mean_size': float(np.mean(list(cluster_sizes.values()))),
+        'median_size': float(np.median(list(cluster_sizes.values())))
     }
     
     print(f"  群組統計:")
