@@ -6,7 +6,11 @@ import os
 from pathlib import Path
 
 class Config:
+
     """分析流程的所有配置參數"""
+    # USE_GPU = True  # 使用GPU
+    # ES_BATCH_SIZE = 5000  # GPU可以更大批次
+    # ES_SAVE_INTERVAL = 50000
     
     # ===== 路徑配置 =====
     PROJECT_ROOT = Path(__file__).parent.parent
@@ -22,11 +26,11 @@ class Config:
     
     # ===== 步驟1: ES參數 =====
     TAU_MAX = 10                # 時間窗口（天）
-    MIN_Q = 0.5                 # Q值閾值（過濾弱同步）
+    MIN_Q = 1                 # Q值閾值（過濾弱同步）
     ES_N_JOBS = -1              # 並行核心數（-1表示使用所有核心）
     
     # ===== 步驟2: 事件矩陣參數 =====
-    DBSCAN_EPS = 10             # 時間聚類窗口（天）
+    DBSCAN_EPS = 1             # 時間聚類窗口（天）
     DBSCAN_MIN_SAMPLES = 3      # 最小樣本數（定義事件的最小配對數）
 
     # ===== 步驟3: 相似度計算參數 =====
@@ -35,7 +39,7 @@ class Config:
     # ===== 步驟4: Louvain參數 =====
     NUM_LOUVAIN_RUNS = 100      # Louvain運行次數
     LOUVAIN_GAMMA = 1         # 解析度參數（控制社群大小）
-    MIN_SIMILARITY = 0.01        # 建立網絡的最小相似度閾值
+    MIN_SIMILARITY = 0.3        # 建立網絡的最小相似度閾值
     
     # ===== 步驟5: 共識矩陣參數 =====
     TOP_N_PARTITIONS = 25       # 取模組度最高的前N次結果
@@ -43,19 +47,22 @@ class Config:
     # ===== 步驟6: 階層式分群參數 =====
     # K值選擇範圍
     MIN_CLUSTERS = 1            # 最小分群數
-    MAX_CLUSTERS = 200          # 最大分群數
+    MAX_CLUSTERS = 10          # 最大分群數
     
     # 約束條件
-    MIN_CLUSTER_SIZE = 6        # 每群最少地點數
+    MIN_CLUSTER_SIZE = 3        # 每群最少地點數
     
     # 階層式分群方法
-    LINKAGE_METHOD = 'average'     # 連結方法：'ward', 'complete', 'average'
+    LINKAGE_METHOD = 'complete'     # 連結方法：'ward', 'complete', 'average'
     
     # 手動覆蓋（如果需要強制指定K值）
     FORCE_NUM_CLUSTERS = None   # 設為None則自動選擇，設為整數則強制使用該K值
     
     # ===== 輸出控制 =====
     VERBOSE = True              # 是否顯示詳細信息
+
+    # ===== 步驟7: 閾值參數 =====
+    THRESHOLD = 0.4
     
     @classmethod
     def create_directories(cls):
